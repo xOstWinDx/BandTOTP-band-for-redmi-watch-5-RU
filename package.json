@@ -1,0 +1,16 @@
+{
+  "name": "bandtotp-redmi-watch-5-ru",
+  "version": "1.2.0",
+  "private": true,
+  "scripts": {
+    "prepare:aiot": "node scripts/prepare-aiot-src.js",
+    "build": "npm run prepare:aiot && aiot build",
+    "release": "npm run prepare:aiot && aiot release"
+  },
+  "dependencies": {
+    "crypto-js": "^4.2.0"
+  },
+  "devDependencies": {
+    "aiot-toolkit": "2.0.5"
+  }
+}

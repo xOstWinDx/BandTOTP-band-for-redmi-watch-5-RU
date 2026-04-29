@@ -1,183 +1,492 @@
 <template>
-  <div class="bg" onswipe="exit">
-    <!-- biaodan -->
-    <list class="bg" style="left: 3px;width: 186px;padding-top:86px;padding-bottom:86px;" id="list">
-      <list-item for="{{list}}"style="height: 110px;flex-wrap: wrap;background-color: #262626;margin-bottom:8px;border-radius: 27px;"type="aa" onclick="info({{$idx}})">
-        <text style="position: absolute;left:12px;top:12px;width:162px;height: 42px;text-align: left;lines: 1; text-overflow: ellipsis;">{{$item.name}}</text>
-        <text style="position: absolute;left: 12px;top: 61px;width: 162px;font-size: 28px;color: #A8A8A8;text-align: left;">{{$item.otp}}</text>
+  <div class="screen" style="{{screenStyle}}" onswipe="goBack">
+    <list id="list" class="token-list" style="{{listStyle}}" show="{{!aboutOpen&&!detailsOpen&&list.length>0}}">
+      <list-item for="{{list}}" type="token" style="{{tokenCardStyle}}" onclick="openDetails($idx)">
+        <text style="{{tokenNameStyle}}">{{$item.name}}</text>
+        <text style="{{tokenSubStyle}}" if="{{$item.subtitle}}">{{$item.subtitle}}</text>
+        <text style="{{tokenCodeStyle}}">{{$item.otp}}</text>
       </list-item>
     </list>
-    <img src="/common/nokey.png"style="position: absolute;" if="{{list.length==0}}"/>
-    <!-- 渐变遮罩 -->
-    <img src="/common/tblack.png"/>
-    <img src="/common/bblack.png" style="position: absolute;bottom:0px"/>
-    <!-- 详情 -->
-    <div class="bg" style='justify-content: center;flex-wrap: wrap;flex-direction: column;align-content: center;'show="{{more_show}}">
-        <text>{{more.name}}</text>
-        <text if="{{more.usr}}"style="font-size: 20px;font-weight: normal;">{{more.usr}}</text>
-        <text style="font-size: 40px;">{{more.otp}}</text>
-        <text style="font-size: 20px;">剩余时间{{timelast}}S</text>
-        <img src="/common/del.png"onclick="del()" style="position: absolute;left: 45px; top: 6px;"/>
-    </div>
-    <progress style="position: absolute;left: 2px;bottom: 6px;center-y:0px;center-x:94px;width: 188px;height: 94px;radius:94px;start-angle:240deg;total-angle:-120deg;stroke-width:10px;background-color: rgba(255, 255, 255, 0.6);;color:white" percent="{{timeProgress}}" type="arc" if="{{list.length!=0}}"></progress> 
-    <!-- 关于 -->
-    <img src="/common/info.png"onclick="i()" style="position: absolute;left: 45px; top: 6px;"show="{{!ab&&!more_show}}"/>
-    <scroll class="bg" show="{{ab}}" scroll-y="true" bounces="true">
-			<img src="/common/about.png" />
-    </scroll>
-    <!--返回-->
-    <img src="/common/back.png"onclick="exit('e')" style="position: absolute;left: 45px; top: 6px;"show="{{ab}}"/>
-	</div>
-</template>
-<script>
-import {
-    TOTP,SteamTotp,timeOffset
-} from './totp';
-import prompt from '@system.prompt'
-import interconnect from '@system.interconnect'
-import storage from "@system.storage";
-let keyInterval, timeInterval, nowi, delTimeout, delCount
-const conn = interconnect.instance(),
-    dataKey = 'keys'
-//密钥类
-class key {
-    constructor(key, name, usr = '') {
-        this.name = name
-        this.usr = usr
-        this.key = key
-        this.upd()
-    }
-    upd() {
-        if(this.name.toLowerCase()==="steam")this.otp=SteamTotp(this.key)
-        else this.otp = TOTP(this.key)
-    }
-    toString() {
-        return `{"name":"${this.name}","usr":${this.usr},"key":${this.key}}`
-    }
-}
-export default {
-    private: {
-        ab: false,
-        list: [/*  new key("website","website",'account')  */],
-        more_show: false,
-        more: null,
-        timelast: 0,
-        timeProgress: 0,
-    },
-    onInit() {
-        storage.get({
-            key: dataKey,
-            success: (data) => {
-                if (data) {
-                    //prompt.showToast({message:data,duration: 2000})
-                    data = JSON.parse(data)
-                    data.list.forEach((e) => this.list.push(new key(e.key, e.name, e.usr)))
-                }
-            }
-        })
-        conn.onmessage = (data) => {
-            try {
-                let d = JSON.parse(data.data).list
-                d.forEach((e) => {
-                    let index = this.list.findIndex((a) => e.key == a.key)
-                    if (index != -1) { //当密钥重复时刷新名字
-                        this.list[index].name = e.name
-                        this.list[index].usr = e.usr
-                    } else {
-                        this.list.push(new key(e.key, e.name, e.usr))
-                    }
-                })
-                this.save()
-            } catch (error) {
-                prompt.showToast({
-                    message: error.toString(),
-                    duration: 2000
-                })
-            }
-        }
 
-    },
-    i() { //关于
-        this.ab = true
-    },
-    info(i) { //更多
-        nowi = i
-        this.more = this.list[i]
-        this.more_show = true
-    },
-    exit(a) { //返回
-        if (a.direction == 'right' || a == "e") {
-            if (this.ab || this.more_show) {
-                this.more_show = this.ab = false
-            } else this.$app.exit()
-        }
-    },
-    onBackPress() {
-        this.exit("e")
-        return true
-    },
-    save() { //保存
-        let save = {
-            list: this.list
-        }
-        storage.set({
-            key: dataKey,
-            value: JSON.stringify(save)
-        })
-    },
-    onShow() { //亮屏时刷新防止死亡
-        clearInterval(timeInterval)
-        clearInterval(keyInterval)
-        this.list.forEach((e) => e.upd())
-        var ms2NextSecond = 1000 - (Date.now() % 1000);
-        setTimeout(() => keyInterval = setInterval(() => {
-            var ttl = Math.floor(Date.now() / 1000 % 30);
-            if (ttl === 0) {
-                this.list.forEach((e) => e.upd())
-            }
-            this.timelast = 30 - ttl
-        }, 1000), ms2NextSecond);
-        timeInterval = setInterval(() => {
-            this.timeProgress = (30000 - Date.now() % 30000) / 300
-        }, 10);
-    },
-    del() { //删除
-        clearTimeout(delTimeout)
-        if (!delCount) {
-            delCount = true
-            delTimeout = setTimeout(() => delCount = false, 500)
-            prompt.showToast({
-                message: "双击确认删除"
-            })
-            return
-        }
-        this.list.splice(nowi, 1);
-        delCount =this.more_show = false
-        this.save()
-        prompt.showToast({
-            message: "删除成功"
-        })
+    <div class="empty-state" style="{{emptyStyle}}" show="{{!aboutOpen&&!detailsOpen&&list.length==0}}">
+      <img src="/common/logo.png" style="{{emptyLogoStyle}}" />
+      <text style="{{emptyTitleStyle}}">Ключей нет</text>
+      <text style="{{emptyTextStyle}}">Импортируйте аккаунты с телефона</text>
+    </div>
+
+    <progress
+      style="{{progressStyle}}"
+      percent="{{timeProgress}}"
+      type="{{progressType}}"
+      if="{{list.length!=0&&!aboutOpen}}"
+    ></progress>
+
+    <div onclick="openAbout" style="{{infoButtonStyle}}" show="{{!aboutOpen&&!detailsOpen}}">
+      <text style="{{navButtonTextStyle}}">i</text>
+    </div>
+
+    <div class="screen" style="{{screenStyle}}" show="{{detailsOpen}}">
+      <text style="{{detailsTitleStyle}}">{{details.name}}</text>
+      <text style="{{detailsUserStyle}}" if="{{details.subtitle}}">{{details.subtitle}}</text>
+      <text style="{{detailsCodeStyle}}">{{details.otp}}</text>
+      <text style="{{detailsTimerStyle}}">Осталось {{timeLeft}} с</text>
+      <div onclick="deleteCurrent" style="{{deleteButtonStyle}}">
+        <text style="{{navButtonTextStyle}}">×</text>
+      </div>
+    </div>
+
+    <scroll class="screen" style="{{screenStyle}}" show="{{aboutOpen}}" scroll-y="true" bounces="true">
+      <div class="about-panel" style="{{aboutPanelStyle}}">
+        <img src="/common/logo.png" style="{{aboutLogoStyle}}" />
+        <text style="{{aboutTitleStyle}}">BandTOTP RU</text>
+        <text style="{{aboutTextStyle}}">Версия 1.2</text>
+        <text style="{{aboutTextStyle}}">Коды создаются прямо на часах и обновляются раз в 30 секунд.</text>
+        <text style="{{aboutTextStyle}}">Импорт: старый формат приложения, otpauth-ссылки и JSON-экспорт Google Authenticator.</text>
+        <text style="{{aboutTextStyle}}">Steam-коды поддерживаются отдельно.</text>
+      </div>
+    </scroll>
+
+    <div onclick="backButton" style="{{backButtonStyle}}" show="{{aboutOpen}}">
+      <text style="{{navButtonTextStyle}}">&lt;</text>
+    </div>
+  </div>
+</template>
+
+<script>
+import { createTotpGenerator, nowSeconds } from "./totp";
+import { normalizeAccounts } from "./importer";
+import prompt from "@system.prompt";
+import interconnect from "@system.interconnect";
+import storage from "@system.storage";
+import device from "@system.device";
+
+const DESIGN_WIDTH = 192;
+const DEFAULT_HEIGHT = 490;
+const STORAGE_KEY = "keys";
+const conn = interconnect.instance();
+
+let tickDelayTimer;
+let tickInterval;
+let selectedIndex = -1;
+let deleteTimer;
+let deleteArmed = false;
+let currentDeviceInfo = { screenWidth: DESIGN_WIDTH, screenHeight: DEFAULT_HEIGHT, screenShape: "pill-shaped" };
+
+class TotpAccount {
+  constructor(data) {
+    this.otp = "------";
+    this.error = "";
+    this.lastCounter = -1;
+    this.apply(data);
+  }
+
+  apply(data) {
+    const value = data || {};
+    this.name = String(value.name || "TOTP");
+    this.usr = String(value.usr || "");
+    this.key = String(value.key || "");
+    this.type = value.type === "steam" ? "steam" : "totp";
+    this.period = Math.max(1, Number(value.period) || 30);
+    this.digits = Math.max(1, Math.min(Number(value.digits) || 6, 8));
+    this.algorithm = value.algorithm || "SHA1";
+    this.subtitle = this.usr;
+    this.lastCounter = -1;
+
+    try {
+      this.generator = createTotpGenerator(this.key, {
+        type: this.type,
+        period: this.period,
+        digits: this.digits,
+        algorithm: this.algorithm
+      });
+      this.error = "";
+    } catch (error) {
+      this.generator = null;
+      this.error = "Ошибка ключа";
+      this.subtitle = this.error;
+      this.otp = "------";
     }
+  }
+
+  refresh(atSeconds) {
+    if (!this.generator) {
+      return;
+    }
+
+    const counter = Math.floor(atSeconds / this.period);
+    if (counter === this.lastCounter && this.otp) {
+      return;
+    }
+
+    try {
+      this.otp = this.generator(atSeconds);
+      this.lastCounter = counter;
+      this.error = "";
+      this.subtitle = this.usr;
+    } catch (error) {
+      this.error = "Ошибка ключа";
+      this.subtitle = this.error;
+      this.otp = "------";
+    }
+  }
+
+  toJSON() {
+    const result = {
+      name: this.name,
+      usr: this.usr,
+      key: this.key
+    };
+
+    if (this.type === "steam") {
+      result.type = "steam";
+    }
+    if (this.period !== 30) {
+      result.period = this.period;
+    }
+    if (this.digits !== 6) {
+      result.digits = this.digits;
+    }
+    if (this.algorithm !== "SHA1") {
+      result.algorithm = this.algorithm;
+    }
+
+    return result;
+  }
 }
+
+function fitTextSize(text, baseSize, minSize) {
+  const length = String(text || "").length;
+  if (length > 18) {
+    return Math.max(minSize, baseSize - 6);
+  }
+  if (length > 12) {
+    return Math.max(minSize, baseSize - 3);
+  }
+  return baseSize;
+}
+
+function parseScreenHeight(info) {
+  const width = Number(info && info.screenWidth) || DESIGN_WIDTH;
+  const height = Number(info && info.screenHeight) || DEFAULT_HEIGHT;
+  return Math.max(180, Math.round(height * DESIGN_WIDTH / width));
+}
+
+export default {
+  private: {
+    aboutOpen: false,
+    detailsOpen: false,
+    list: [],
+    details: { name: "", subtitle: "", otp: "------", period: 30 },
+    timeLeft: 30,
+    timeProgress: 100,
+    progressType: "arc",
+    screenStyle: "",
+    listStyle: "",
+    tokenCardStyle: "",
+    tokenNameStyle: "",
+    tokenSubStyle: "",
+    tokenCodeStyle: "",
+    emptyStyle: "",
+    emptyLogoStyle: "",
+    emptyTitleStyle: "",
+    emptyTextStyle: "",
+    progressStyle: "",
+    infoButtonStyle: "",
+    backButtonStyle: "",
+    deleteButtonStyle: "",
+    navButtonTextStyle: "",
+    detailsTitleStyle: "",
+    detailsUserStyle: "",
+    detailsCodeStyle: "",
+    detailsTimerStyle: "",
+    aboutPanelStyle: "",
+    aboutLogoStyle: "",
+    aboutTitleStyle: "",
+    aboutTextStyle: ""
+  },
+
+  onInit() {
+    this.applyLayout({ screenWidth: DESIGN_WIDTH, screenHeight: DEFAULT_HEIGHT, screenShape: "pill-shaped" });
+    device.getInfo({
+      success: (info) => this.applyLayout(info),
+      fail: () => this.applyLayout({ screenWidth: DESIGN_WIDTH, screenHeight: DEFAULT_HEIGHT, screenShape: "pill-shaped" })
+    });
+
+    storage.get({
+      key: STORAGE_KEY,
+      success: (data) => {
+        this.mergeAccounts(normalizeAccounts(data), false);
+        this.refreshAll();
+      }
+    });
+
+    conn.onmessage = (message) => {
+      const payload = message && message.data !== undefined ? message.data : message;
+      const result = this.mergeAccounts(normalizeAccounts(payload), true);
+
+      if (result.changed) {
+        this.save();
+        this.refreshAll();
+      }
+    };
+  },
+
+  applyLayout(info) {
+    if (info && info.screenWidth && info.screenHeight) {
+      currentDeviceInfo = info;
+    }
+
+    const activeInfo = currentDeviceInfo;
+    const height = parseScreenHeight(activeInfo);
+    const compact = height < 270;
+    const tall = height > 360;
+    const isRound = activeInfo && activeInfo.screenShape === "circle";
+    const side = isRound ? 24 : compact ? 16 : 14;
+    const contentWidth = DESIGN_WIDTH - side * 2;
+    const innerLeft = 12;
+    const innerWidth = contentWidth - 24;
+    const top = compact ? 44 : tall ? 58 : 50;
+    const bottom = compact ? 42 : tall ? 92 : 62;
+    const cardHeight = compact ? 88 : tall ? 104 : 94;
+    const listHeight = Math.max(cardHeight + 8, height - top - bottom);
+    const titleSize = compact ? 19 : 22;
+    const subTop = compact ? 32 : 37;
+    const subSize = compact ? 14 : 16;
+    const subHeight = compact ? 16 : 20;
+    const codeTop = compact ? 50 : tall ? 62 : 56;
+    const codeSize = compact ? 25 : tall ? 30 : 28;
+    const codeHeight = compact ? 28 : tall ? 34 : 32;
+    const detailCodeSize = compact ? 38 : tall ? 52 : 48;
+    const detailCodeHeight = compact ? 50 : 62;
+    const detailsLeft = side;
+    const detailsWidth = DESIGN_WIDTH - side * 2;
+    const aboutLeft = isRound ? 26 : compact ? 20 : 18;
+    const aboutWidth = DESIGN_WIDTH - aboutLeft * 2;
+    const aboutTextSize = compact ? 15 : 16;
+    const aboutTextHeight = compact ? 66 : 62;
+    const aboutPanelHeight = Math.max(height + 120, 390);
+
+    this.screenStyle = "position:absolute;left:0px;top:0px;width:192px;height:" + height + "px;background-color:#000000;";
+    this.listStyle =
+      "position:absolute;left:" + side + "px;top:" + top + "px;width:" + contentWidth + "px;height:" + listHeight + "px;";
+    this.tokenCardStyle =
+      "height:" + cardHeight + "px;flex-wrap:wrap;background-color:#191919;margin-bottom:8px;" +
+      "border-radius:12px;border:2px solid rgba(255,255,255,0.08);";
+    this.tokenNameStyle =
+      "position:absolute;left:" + innerLeft + "px;top:8px;width:" + innerWidth +
+      "px;height:24px;font-size:" + titleSize + "px;font-weight:bold;color:#ffffff;text-align:left;lines:1;text-overflow:ellipsis;";
+    this.tokenSubStyle =
+      "position:absolute;left:" + innerLeft + "px;top:" + subTop + "px;width:" + innerWidth +
+      "px;height:" + subHeight + "px;font-size:" + subSize + "px;color:#8e8e8e;text-align:left;lines:1;text-overflow:ellipsis;";
+    this.tokenCodeStyle =
+      "position:absolute;left:" + innerLeft + "px;top:" + codeTop + "px;width:" + innerWidth +
+      "px;height:" + codeHeight + "px;font-size:" + codeSize + "px;font-weight:bold;color:#29f0a3;text-align:left;letter-spacing:0px;";
+    this.emptyStyle =
+      "position:absolute;left:" + side + "px;top:" + (compact ? 52 : Math.max(46, Math.floor(height * 0.28))) +
+      "px;width:" + contentWidth + "px;height:" + (compact ? 130 : 150) + "px;flex-direction:column;align-items:center;justify-content:center;";
+    this.emptyLogoStyle = "width:54px;height:54px;margin-bottom:14px;";
+    this.emptyTitleStyle = "width:" + contentWidth + "px;height:30px;font-size:24px;font-weight:bold;color:#ffffff;text-align:center;";
+    this.emptyTextStyle = "width:" + contentWidth + "px;height:42px;font-size:16px;color:#9a9a9a;text-align:center;lines:2;";
+    this.progressType = compact || isRound ? "horizontal" : "arc";
+    this.progressStyle = compact || isRound
+      ? "position:absolute;left:" + side + "px;bottom:14px;width:" + contentWidth + "px;height:7px;stroke-width:7px;background-color:#303030;color:#29f0a3;"
+      : "position:absolute;left:14px;bottom:8px;center-y:0px;center-x:96px;width:164px;height:82px;radius:82px;" +
+        "start-angle:240deg;total-angle:-120deg;stroke-width:9px;background-color:rgba(255,255,255,0.22);color:#29f0a3;";
+    const buttonTop = compact ? 9 : 10;
+    const buttonSize = compact ? 28 : 30;
+    this.infoButtonStyle =
+      "position:absolute;left:" + (DESIGN_WIDTH - side - buttonSize) + "px;top:" + buttonTop +
+      "px;width:" + buttonSize + "px;height:" + buttonSize + "px;border-radius:99px;background-color:#202020;" +
+      "border:2px solid rgba(255,255,255,0.12);justify-content:center;align-items:center;";
+    this.backButtonStyle =
+      "position:absolute;left:" + side + "px;top:" + buttonTop + "px;width:" + buttonSize + "px;height:" + buttonSize +
+      "px;border-radius:99px;background-color:#202020;border:2px solid rgba(255,255,255,0.12);justify-content:center;align-items:center;";
+    this.deleteButtonStyle =
+      "position:absolute;left:" + (DESIGN_WIDTH - side - buttonSize) + "px;top:" + buttonTop +
+      "px;width:" + buttonSize + "px;height:" + buttonSize + "px;border-radius:99px;background-color:#2b1717;" +
+      "border:2px solid rgba(255,105,105,0.20);justify-content:center;align-items:center;";
+    this.navButtonTextStyle =
+      "width:" + buttonSize + "px;height:" + buttonSize + "px;font-size:" + (compact ? 18 : 19) +
+      "px;font-weight:bold;color:#ffffff;text-align:center;";
+    this.detailsTitleStyle =
+      "position:absolute;left:" + detailsLeft + "px;top:" + (compact ? 52 : tall ? 98 : 74) +
+      "px;width:" + detailsWidth + "px;height:" + (compact ? 28 : 34) + "px;font-size:" + fitTextSize(this.details.name, compact ? 22 : 30, 18) +
+      "px;font-weight:bold;color:#ffffff;text-align:center;lines:1;text-overflow:ellipsis;";
+    this.detailsUserStyle =
+      "position:absolute;left:" + detailsLeft + "px;top:" + (compact ? 82 : tall ? 136 : 110) +
+      "px;width:" + detailsWidth + "px;height:26px;font-size:18px;color:#9a9a9a;text-align:center;lines:1;text-overflow:ellipsis;";
+    this.detailsCodeStyle =
+      "position:absolute;left:" + side + "px;top:" + (compact ? 106 : tall ? 176 : 142) +
+      "px;width:" + contentWidth + "px;height:" + detailCodeHeight + "px;font-size:" + detailCodeSize + "px;font-weight:bold;color:#29f0a3;text-align:center;letter-spacing:0px;";
+    this.detailsTimerStyle =
+      "position:absolute;left:" + detailsLeft + "px;top:" + (compact ? 162 : tall ? 240 : 204) +
+      "px;width:" + detailsWidth + "px;height:24px;font-size:18px;color:#ffffff;text-align:center;";
+    this.aboutPanelStyle =
+      "position:absolute;left:" + aboutLeft + "px;top:" + (compact ? 50 : 58) +
+      "px;width:" + aboutWidth + "px;height:" + aboutPanelHeight + "px;flex-direction:column;align-items:center;padding-bottom:24px;";
+    this.aboutLogoStyle = "width:" + (compact ? 46 : 52) + "px;height:" + (compact ? 46 : 52) + "px;margin-bottom:10px;";
+    this.aboutTitleStyle = "width:" + aboutWidth + "px;height:30px;font-size:" + (compact ? 21 : 23) + "px;font-weight:bold;color:#ffffff;text-align:center;";
+    this.aboutTextStyle =
+      "width:" + aboutWidth + "px;height:" + aboutTextHeight + "px;margin-top:6px;font-size:" + aboutTextSize +
+      "px;color:#bdbdbd;text-align:center;lines:4;";
+  },
+
+  mergeAccounts(accounts, showResult) {
+    let added = 0;
+    let updated = 0;
+
+    for (let i = 0; i < accounts.length; i++) {
+      const account = accounts[i];
+      const index = this.findAccount(account);
+
+      if (index === -1) {
+        this.list.push(new TotpAccount(account));
+        added++;
+      } else {
+        this.list[index].apply(account);
+        updated++;
+      }
+    }
+
+    if (showResult) {
+      if (added || updated) {
+        prompt.showToast({ message: "Импорт: +" + added + ", обновлено: " + updated, duration: 2000 });
+      } else {
+        prompt.showToast({ message: "Не найдено TOTP-ключей", duration: 2000 });
+      }
+    }
+
+    return { changed: added + updated > 0 };
+  },
+
+  findAccount(account) {
+    for (let i = 0; i < this.list.length; i++) {
+      if (this.list[i].key === account.key && this.list[i].type === account.type) {
+        return i;
+      }
+    }
+    return -1;
+  },
+
+  openAbout() {
+    this.aboutOpen = true;
+  },
+
+  openDetails(index) {
+    selectedIndex = index;
+    this.details = this.list[index] || { name: "", subtitle: "", otp: "------", period: 30 };
+    this.detailsOpen = true;
+    this.applyLayout({});
+    this.updateClock();
+  },
+
+  goBack(event) {
+    if ((event && event.direction === "right") || event === "button" || event === "back") {
+      if (this.aboutOpen || this.detailsOpen) {
+        this.aboutOpen = false;
+        this.detailsOpen = false;
+      } else {
+        this.$app.exit();
+      }
+    }
+  },
+
+  backButton() {
+    this.goBack("button");
+  },
+
+  onBackPress() {
+    this.goBack("back");
+    return true;
+  },
+
+  save() {
+    storage.set({
+      key: STORAGE_KEY,
+      value: JSON.stringify({ list: this.list })
+    });
+  },
+
+  refreshAll() {
+    const atSeconds = nowSeconds();
+    for (let i = 0; i < this.list.length; i++) {
+      this.list[i].refresh(atSeconds);
+    }
+    if (selectedIndex >= 0 && this.list[selectedIndex]) {
+      this.details = this.list[selectedIndex];
+    }
+    this.updateClock(atSeconds);
+  },
+
+  updateClock(atSeconds) {
+    const now = atSeconds || nowSeconds();
+    const period = this.detailsOpen && this.details.period ? this.details.period : 30;
+    const left = period - (now % period);
+    this.timeLeft = left || period;
+    this.timeProgress = Math.floor((this.timeLeft / period) * 100);
+  },
+
+  startTicker() {
+    this.stopTicker();
+    this.refreshAll();
+
+    const delay = 1000 - (Date.now() % 1000);
+    tickDelayTimer = setTimeout(() => {
+      this.refreshAll();
+      tickInterval = setInterval(() => this.refreshAll(), 1000);
+    }, delay);
+  },
+
+  stopTicker() {
+    clearTimeout(tickDelayTimer);
+    clearInterval(tickInterval);
+  },
+
+  onShow() {
+    this.startTicker();
+  },
+
+  onHide() {
+    this.stopTicker();
+  },
+
+  onDestroy() {
+    this.stopTicker();
+    clearTimeout(deleteTimer);
+  },
+
+  deleteCurrent() {
+    clearTimeout(deleteTimer);
+
+    if (!deleteArmed) {
+      deleteArmed = true;
+      deleteTimer = setTimeout(() => {
+        deleteArmed = false;
+      }, 700);
+      prompt.showToast({ message: "Нажмите еще раз для удаления", duration: 1600 });
+      return;
+    }
+
+    if (selectedIndex >= 0) {
+      this.list.splice(selectedIndex, 1);
+      selectedIndex = -1;
+      this.detailsOpen = false;
+      deleteArmed = false;
+      this.save();
+      this.updateClock();
+      prompt.showToast({ message: "Ключ удален", duration: 1600 });
+    }
+  }
+};
 </script>
+
 <style>
-.bg{
-  position: absolute;
-  width: 192px;
-  height: 490px;
-  background-color: black;
+.screen {
+  background-color: #000000;
 }
-text{
-  font-size: 30px;
-  font-weight: bold;
-  color: #FFFFFF;
-  text-align:center
-}
-.btn{
-  width: 60px;
-  height: 60px;
-  border-radius: 99px;
-  background-color: #262626;
-  border: 3px solid rgba(255, 255, 255, 0.06);
+
+text {
+  color: #ffffff;
+  text-align: center;
 }
 </style>
