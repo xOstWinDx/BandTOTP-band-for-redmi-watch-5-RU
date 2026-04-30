@@ -1,6 +1,8 @@
 <template>
   <div class="screen" style="{{screenStyle}}" onswipe="goBack">
-    <list id="list" class="token-list" style="{{listStyle}}" show="{{!aboutOpen&&!detailsOpen&&!unlockOpen&&list.length>0}}">
+    <text style="{{loadingStyle}}" show="{{loading&&!aboutOpen&&!detailsOpen&&!unlockOpen}}">Загрузка...</text>
+
+    <list id="list" class="token-list" style="{{listStyle}}" show="{{!loading&&!aboutOpen&&!detailsOpen&&!unlockOpen&&list.length>0}}">
       <list-item for="{{list}}" type="token" style="{{tokenCardStyle}}" onclick="openDetails($idx)">
         <text style="{{tokenNameStyle}}">{{$item.name}}</text>
         <text style="{{tokenSubStyle}}" if="{{$item.subtitle}}">{{$item.subtitle}}</text>
@@ -8,13 +10,13 @@
       </list-item>
     </list>
 
-    <div class="empty-state" style="{{emptyStyle}}" show="{{!aboutOpen&&!detailsOpen&&!unlockOpen&&list.length==0}}">
+    <div class="empty-state" style="{{emptyStyle}}" show="{{!loading&&!aboutOpen&&!detailsOpen&&!unlockOpen&&list.length==0}}">
       <img src="/common/logo.png" style="{{emptyLogoStyle}}" />
       <text style="{{emptyTitleStyle}}">Ключей нет</text>
       <text style="{{emptyTextStyle}}">Импортируйте аккаунты с телефона</text>
     </div>
 
-    <div onclick="openAbout" style="{{infoButtonStyle}}" show="{{!aboutOpen&&!detailsOpen&&!unlockOpen}}">
+    <div onclick="openAbout" style="{{infoButtonStyle}}" show="{{!loading&&!aboutOpen&&!detailsOpen&&!unlockOpen}}">
       <text style="{{navButtonTextStyle}}">i</text>
     </div>
 
@@ -32,8 +34,8 @@
       <div onclick="appendPin(9)" style="{{pinButton9Style}}"><text style="{{pinButtonTextStyle}}">9</text></div>
       <div onclick="removePin" style="{{pinBackspaceStyle}}"><text style="{{pinButtonTextStyle}}">&lt;</text></div>
       <div onclick="appendPin(0)" style="{{pinButton0Style}}"><text style="{{pinButtonTextStyle}}">0</text></div>
-      <div onclick="submitPin" style="{{pinOkStyle}}"><text style="{{pinButtonTextStyle}}">OK</text></div>
-      <text onclick="resetVault" style="{{resetVaultStyle}}">Сбросить хранилище</text>
+      <div onclick="submitPin" style="{{pinOkStyle}}"><text style="{{pinButtonTextStyle}}">&gt;</text></div>
+      <div onclick="resetVault" style="{{resetVaultStyle}}"><text style="{{navButtonTextStyle}}">×</text></div>
     </div>
 
     <div class="screen" style="{{screenStyle}}" show="{{detailsOpen}}">
@@ -84,10 +86,12 @@ const conn = interconnect.instance();
 let tickDelayTimer;
 let tickInterval;
 let lockTimer;
+let boostTimer;
 let selectedIndex = -1;
 let unlockTargetIndex = -1;
 let deleteTimer;
 let resetTimer;
+let unlockTimer;
 let deleteArmed = false;
 let resetArmed = false;
 let currentDeviceInfo = { screenWidth: DESIGN_WIDTH, screenHeight: DEFAULT_HEIGHT, screenShape: "pill-shaped" };
@@ -258,6 +262,7 @@ export default {
     aboutOpen: false,
     detailsOpen: false,
     unlockOpen: false,
+    loading: true,
     locked: false,
     list: [],
     vault: null,
@@ -270,6 +275,7 @@ export default {
     timeLeft: 30,
     timeProgress: 100,
     screenStyle: "",
+    loadingStyle: "",
     listStyle: "",
     tokenCardStyle: "",
     tokenNameStyle: "",
@@ -325,22 +331,10 @@ export default {
           return;
         }
 
-        storage.get({
-          key: STORAGE_KEY,
-          success: (legacyData) => {
-            this.setAccounts(normalizeAccounts(legacyData));
-            this.updateClock();
-          }
-        });
+        this.loadLegacyStorage();
       },
       fail: () => {
-        storage.get({
-          key: STORAGE_KEY,
-          success: (legacyData) => {
-            this.setAccounts(normalizeAccounts(legacyData));
-            this.updateClock();
-          }
-        });
+        this.loadLegacyStorage();
       }
     });
 
@@ -353,6 +347,7 @@ export default {
         this.vaultMeta = imported.meta || [];
         this.lockVault();
         this.saveVault();
+        this.openUnlock(-1);
         prompt.showToast({ message: "Зашифрованное хранилище обновлено", duration: 2000 });
         return;
       }
@@ -385,8 +380,8 @@ export default {
     const contentWidth = DESIGN_WIDTH - side * 2;
     const innerLeft = 12;
     const innerWidth = contentWidth - 24;
-    const top = compact ? 44 : tall ? 58 : 50;
-    const bottom = compact ? 42 : tall ? 92 : 62;
+    const top = compact ? 38 : tall ? 50 : 44;
+    const bottom = compact ? 24 : tall ? 42 : 34;
     const cardHeight = compact ? 74 : tall ? 86 : 80;
     const listHeight = Math.max(cardHeight + 8, height - top - bottom);
     const titleSize = compact ? 19 : 22;
@@ -407,6 +402,9 @@ export default {
     const aboutPanelHeight = Math.max(height + 120, 390);
 
     this.screenStyle = "position:absolute;left:0px;top:0px;width:192px;height:" + height + "px;background-color:#000000;";
+    this.loadingStyle =
+      "position:absolute;left:" + side + "px;top:" + Math.max(70, Math.floor(height * 0.42)) +
+      "px;width:" + contentWidth + "px;height:30px;font-size:20px;color:#ffffff;text-align:center;";
     this.listStyle =
       "position:absolute;left:" + side + "px;top:" + top + "px;width:" + contentWidth + "px;height:" + listHeight + "px;";
     this.tokenCardStyle =
@@ -472,27 +470,37 @@ export default {
       "width:" + aboutWidth + "px;height:" + aboutTextHeight + "px;margin-top:6px;font-size:" + aboutTextSize +
       "px;color:#bdbdbd;text-align:center;lines:4;";
 
-    const pinSize = compact ? 34 : 38;
-    const pinGap = compact ? 8 : 10;
-    const pinLeft = Math.floor((DESIGN_WIDTH - pinSize * 3 - pinGap * 2) / 2);
-    const pinTop = compact ? 84 : tall ? 150 : 118;
-    const pinStep = pinSize + pinGap;
-    const pinStyle = "width:" + pinSize + "px;height:" + pinSize + "px;border-radius:99px;background-color:#1f1f1f;" +
+    const headerTop = buttonTop + buttonSize + 4;
+    const titleHeight = compact ? 20 : 24;
+    const dotsHeight = compact ? 22 : 26;
+    const pinGap = compact ? 4 : tall ? 9 : 6;
+    const pinBottomPad = compact ? 6 : 10;
+    const pinMaxHeight = Math.floor((height - headerTop - titleHeight - dotsHeight - 10 - pinBottomPad - pinGap * 3) / 4);
+    const pinHeight = Math.max(24, Math.min(compact ? 30 : tall ? 38 : 34, pinMaxHeight));
+    const pinWidth = Math.max(pinHeight, Math.floor((contentWidth - pinGap * 2) / 3));
+    const pinLeft = Math.floor((DESIGN_WIDTH - pinWidth * 3 - pinGap * 2) / 2);
+    const pinStepX = pinWidth + pinGap;
+    const pinStepY = pinHeight + pinGap;
+    const unlockTitleTop = headerTop;
+    const pinDotsTop = unlockTitleTop + titleHeight + 2;
+    const pinTop = pinDotsTop + dotsHeight + 4;
+    const pinStyle = "width:" + pinWidth + "px;height:" + pinHeight + "px;border-radius:99px;background-color:#1f1f1f;" +
       "border:2px solid rgba(255,255,255,0.14);justify-content:center;align-items:center;";
     const setPinButton = (row, col, extra) => {
-      return "position:absolute;left:" + (pinLeft + col * pinStep) + "px;top:" + (pinTop + row * pinStep) + "px;" +
+      return "position:absolute;left:" + (pinLeft + col * pinStepX) + "px;top:" + (pinTop + row * pinStepY) + "px;" +
         pinStyle + (extra || "");
     };
 
     this.unlockTitleStyle =
-      "position:absolute;left:" + side + "px;top:" + (compact ? 34 : tall ? 70 : 52) +
-      "px;width:" + contentWidth + "px;height:28px;font-size:" + (compact ? 19 : 22) +
+      "position:absolute;left:" + side + "px;top:" + unlockTitleTop +
+      "px;width:" + contentWidth + "px;height:" + titleHeight + "px;font-size:" + (compact ? 17 : 20) +
       "px;font-weight:bold;color:#ffffff;text-align:center;lines:1;text-overflow:ellipsis;";
     this.pinDotsStyle =
-      "position:absolute;left:" + side + "px;top:" + (compact ? 60 : tall ? 104 : 82) +
-      "px;width:" + contentWidth + "px;height:28px;font-size:24px;color:#29f0a3;text-align:center;letter-spacing:0px;";
+      "position:absolute;left:" + side + "px;top:" + pinDotsTop +
+      "px;width:" + contentWidth + "px;height:" + dotsHeight + "px;font-size:" + (compact ? 20 : 23) +
+      "px;color:#29f0a3;text-align:center;letter-spacing:0px;";
     this.pinButtonTextStyle =
-      "width:" + pinSize + "px;height:" + pinSize + "px;font-size:" + (compact ? 17 : 19) +
+      "width:" + pinWidth + "px;height:" + pinHeight + "px;font-size:" + (compact ? 17 : 20) +
       "px;font-weight:bold;color:#ffffff;text-align:center;";
     this.pinButton1Style = setPinButton(0, 0);
     this.pinButton2Style = setPinButton(0, 1);
@@ -507,9 +515,9 @@ export default {
     this.pinButton0Style = setPinButton(3, 1);
     this.pinOkStyle = setPinButton(3, 2, "background-color:#173025;border:2px solid rgba(41,240,163,0.30);");
     this.resetVaultStyle =
-      "position:absolute;left:" + side + "px;top:" + (pinTop + pinStep * 4 + 10) +
-      "px;width:" + contentWidth + "px;height:22px;font-size:" + (compact ? 13 : 14) +
-      "px;color:#ff7777;text-align:center;";
+      "position:absolute;left:" + (DESIGN_WIDTH - side - buttonSize) + "px;top:" + buttonTop +
+      "px;width:" + buttonSize + "px;height:" + buttonSize + "px;border-radius:99px;background-color:#2b1717;" +
+      "border:2px solid rgba(255,105,105,0.20);justify-content:center;align-items:center;";
   },
 
   setAccounts(accounts) {
@@ -517,6 +525,21 @@ export default {
     for (let i = 0; i < accounts.length; i++) {
       this.list.push(new TotpAccount(accounts[i]));
     }
+  },
+
+  loadLegacyStorage() {
+    storage.get({
+      key: STORAGE_KEY,
+      success: (legacyData) => {
+        this.setAccounts(normalizeAccounts(legacyData));
+        this.loading = false;
+        this.updateClock();
+      },
+      fail: () => {
+        this.loading = false;
+        this.updateClock();
+      }
+    });
   },
 
   metaFromAccounts(accounts) {
@@ -543,7 +566,9 @@ export default {
 
       this.vault = data.vault;
       this.vaultMeta = data.meta || [];
+      this.loading = false;
       this.lockVault();
+      this.openUnlock(-1);
       return true;
     } catch (error) {
       return false;
@@ -599,6 +624,7 @@ export default {
     unlockTargetIndex = typeof index === "number" ? index : -1;
     this.aboutOpen = false;
     this.detailsOpen = false;
+    this.loading = false;
     this.unlockOpen = true;
     this.unlockTitle = "Введите PIN";
     this.clearPin();
@@ -629,32 +655,53 @@ export default {
       return;
     }
 
-    try {
-      const decrypted = decryptVault(this.vault, this.pinInput);
-      const accounts = normalizeAccounts(decrypted);
-
-      if (!accounts.length) {
-        throw new Error("Пустое хранилище");
-      }
-
-      this.vaultPin = this.pinInput;
-      this.locked = false;
-      this.unlockOpen = false;
-      this.setAccounts(accounts);
-      this.vaultMeta = this.metaFromAccounts(accounts);
-      this.scheduleAutoLock();
-
-      const target = unlockTargetIndex;
-      unlockTargetIndex = -1;
+    const pin = this.pinInput;
+    this.unlockTitle = "Открываю...";
+    clearTimeout(unlockTimer);
+    unlockTimer = setTimeout(() => {
       this.clearPin();
+      this.unlockTitle = "Введите PIN";
+      prompt.showToast({ message: "Не удалось открыть", duration: 1800 });
+    }, 3500);
 
-      if (target >= 0 && target < this.list.length) {
-        this.openDetails(target);
+    decryptVault(this.vault, pin, {
+      success: (decrypted) => {
+        clearTimeout(unlockTimer);
+        const accounts = decrypted && decrypted.list ? decrypted.list : normalizeAccounts(decrypted);
+
+        if (!accounts.length) {
+          this.clearPin();
+          this.unlockTitle = "Введите PIN";
+          prompt.showToast({ message: "Пустое хранилище", duration: 1600 });
+          return;
+        }
+
+        this.vaultPin = pin;
+        this.locked = false;
+        this.unlockOpen = false;
+        this.setAccounts(accounts);
+        this.vaultMeta = this.metaFromAccounts(accounts);
+        this.scheduleAutoLock();
+
+        const target = unlockTargetIndex;
+        unlockTargetIndex = -1;
+        this.clearPin();
+        this.unlockTitle = "Введите PIN";
+
+        if (target >= 0 && target < this.list.length) {
+          this.openDetails(target);
+        }
+      },
+      fail: (error) => {
+        clearTimeout(unlockTimer);
+        this.clearPin();
+        this.unlockTitle = "Введите PIN";
+        const message = error && error.message === "Нужен повторный импорт"
+          ? "Импортируйте ключи заново"
+          : "Неверный PIN";
+        prompt.showToast({ message: message, duration: 1800 });
       }
-    } catch (error) {
-      this.clearPin();
-      prompt.showToast({ message: "Неверный PIN", duration: 1600 });
-    }
+    });
   },
 
   clearStoredKey(key) {
@@ -811,10 +858,17 @@ export default {
         accounts.push(this.list[i].toJSON());
       }
 
-      this.vault = encryptVault({ list: accounts }, this.vaultPin, this.vault);
-      this.vaultMeta = this.metaFromAccounts(accounts);
-      this.saveVault();
-      this.scheduleAutoLock();
+      encryptVault({ list: accounts }, this.vaultPin, this.vault, {
+        success: (vault) => {
+          this.vault = vault;
+          this.vaultMeta = this.metaFromAccounts(accounts);
+          this.saveVault();
+          this.scheduleAutoLock();
+        },
+        fail: () => {
+          prompt.showToast({ message: "Не удалось сохранить", duration: 1600 });
+        }
+      });
       return;
     }
 
@@ -868,12 +922,14 @@ export default {
   },
 
   onShow() {
-    boostScreen();
     this.startTicker();
+    clearTimeout(boostTimer);
+    boostTimer = setTimeout(boostScreen, 300);
   },
 
   onHide() {
     this.stopTicker();
+    clearTimeout(boostTimer);
     if (this.vault) {
       this.lockVault();
     } else if (this.detailsOpen) {
@@ -887,6 +943,8 @@ export default {
     clearTimeout(deleteTimer);
     clearTimeout(resetTimer);
     clearTimeout(lockTimer);
+    clearTimeout(unlockTimer);
+    clearTimeout(boostTimer);
     restoreScreen();
   },
 
